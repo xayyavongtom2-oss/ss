@@ -1,0 +1,111 @@
+{% extends "base.html" %}{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+{% endblock %}{% block content %}
+<main class="camera-page">
+<div class="camera-top"><a href="{{ url_for('dashboard') }}" class="back">← ກັບໜ້າຫຼັກ</a><span id="aiStatus" class="status-pill searching">● ລໍຖ້າເຊື່ອມກ້ອງມືຖື</span></div>
+<section class="pair-panel" id="pairPanel">
+  <div><p class="eyebrow">CONNECT YOUR PHONE CAMERA</p><h2>ເຊື່ອມກ້ອງມືຖືກັບ PC</h2><p class="muted">ກົດສ້າງ QR Code ແລ້ວໃຊ້ມືຖືສະແກນ. ເປີດໜ້ານີ້ຄ້າງໄວ້.</p><button class="primary" id="makePair">＋ ສ້າງ QR Code ເພື່ອເຊື່ອມຕໍ່</button></div>
+  <div class="qr-area"><div id="qrcode"><span>QR</span></div><b id="pairCode">ຍັງບໍ່ມີລະຫັດ</b><small id="pairHint">QR Code ຈະສະແດງຢູ່ບ່ອນນີ້</small><a id="phoneLink" href="#" target="_blank" rel="noopener" hidden>ເປີດລິ້ງໃນມືຖື</a><small id="pairError" role="alert"></small></div>
+</section>
+<div class="camera-stage" id="cameraStage"><video id="remoteVideo" playsinline autoplay muted></video><canvas id="outputCanvas"></canvas>
+<div class="person-box" id="personBox"><span>AI BODY TRACKING</span></div>
+<div class="camera-overlay-top"><div class="counter-float"><strong id="jumpCount">0</strong><span>ຄັ້ງທີ່ກະໂດດ</span></div><div class="cam-state" id="camState">ລໍຖ້າກ້ອງມືຖື</div></div>
+<div class="camera-overlay-bottom"><span class="ai-ready" id="readyText">● ລໍຖ້າກ້ອງມືຖື</span><span class="camera-hint">ໃຫ້ເຫັນຫົວຮອດຕີນ</span></div></div>
+<div class="camera-metrics"><div><small>ເວລາ</small><b id="timer">00:00</b></div><div><small>ຄວາມໄວສະເລ່ຍ</small><b id="rate">0 / ນາທີ</b></div><div><small>Calories*</small><b id="calories">0 kcal</b></div></div>
+<div class="camera-controls"><button id="startBtn" class="primary start-btn" disabled>▶ ເລີ່ມນັບ</button><button id="pauseBtn" class="round-btn" disabled>Ⅱ<small>ພັກ</small></button><button id="stopBtn" class="round-btn stop-btn" disabled>■<small>ຢຸດ ແລະ ບັນທຶກ</small></button></div>
+<p class="camera-note">ໝາຍເຫດ: ກ້ອງມືຖືຈະສົ່ງພາບສົດມາທີ່ PC ຜ່ານ WebRTC. ຕ້ອງເປີດ HTTPS ເພື່ອໃຊ້ກ້ອງມືຖື. Calories ເປັນຄ່າປະເມີນ.</p>
+</main>
+<script>
+const video=document.getElementById('remoteVideo'), canvas=document.getElementById('outputCanvas'), ctx=canvas.getContext('2d');
+const statusEl=document.getElementById('aiStatus'), readyText=document.getElementById('readyText'), box=document.getElementById('personBox');
+let pose=null, pc=null, roomCode=null, cursor=-1, running=false, paused=false, jumps=0, seconds=0, tick=null, airborne=false, baselineHip=null, lastJump=0, pendingCandidates=[], signalTimer=null, polling=false;
+const ICE_SERVERS={{ ice_servers|tojson }};
+const $=id=>document.getElementById(id);
+function status(t,ok=false){statusEl.textContent='● '+t;statusEl.className='status-pill '+(ok?'ready':'searching');readyText.textContent='● '+t;}
+function formatTime(s){return String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0');}
+function updateStats(){$('jumpCount').textContent=jumps;$('timer').textContent=formatTime(seconds);$('rate').textContent=(seconds?Math.round(jumps/(seconds/60)):0)+' / ນາທີ';$('calories').textContent=(jumps*.08).toFixed(1)+' kcal';}
+async function sendSignal(kind,payload){if(!roomCode)return;await fetch('/api/signal/'+roomCode,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sender:'pc',kind,payload})});}
+async function pollSignals(){
+ if(!roomCode||polling||!pc)return; polling=true;
+ try{
+  const r=await fetch('/api/signal/'+roomCode+'?sender=pc&after='+cursor,{cache:'no-store'});
+  const d=await r.json(); if(!r.ok||!d.ok) throw new Error(d.error||('Signaling HTTP '+r.status));
+  for(const m of d.messages||[]){
+   cursor=Math.max(cursor,m.id);
+   if(m.kind==='answer'){
+    if(!pc.currentRemoteDescription){await pc.setRemoteDescription(m.payload);}
+    for(const c of pendingCandidates){try{await pc.addIceCandidate(c);}catch(err){console.warn('Queued ICE candidate failed',err);}}
+    pendingCandidates=[]; status('ໄດ້ຮັບ Answer • ກຳລັງຈັບຄູ່ສັນຍານ',true);
+   }else if(m.kind==='candidate'&&m.payload){
+    const c=new RTCIceCandidate(m.payload);
+    if(pc.remoteDescription){try{await pc.addIceCandidate(c);}catch(err){console.warn('ICE candidate failed',err);}}
+    else pendingCandidates.push(c);
+   }else if(m.kind==='bye'){status('ກ້ອງມືຖືຕັດການເຊື່ອມຕໍ່');}
+  }
+ }catch(e){console.error('PC signaling poll failed',e);$('pairError').textContent='Signaling: '+e.message;}
+ finally{polling=false;}
+}
+async function createPair(){
+ $('makePair').disabled=true;$('makePair').textContent='ກຳລັງສ້າງ...';$('pairError').textContent='';
+ try{
+  const res=await fetch('/api/pair',{method:'POST',headers:{'Accept':'application/json'}});
+  const data=await res.json().catch(()=>({}));
+  if(!res.ok || !data.ok || !data.code || !data.phone_url) throw new Error(data.error||('Server error '+res.status));
+  roomCode=data.code;
+  $('pairCode').textContent='ລະຫັດ: '+roomCode;
+  $('pairHint').textContent='ສະແກນ QR ຫຼື ເປີດລິ້ງດ້ານລຸ່ມໃນມືຖື';
+  const link=$('phoneLink');link.href=data.phone_url;link.textContent=data.phone_url;link.hidden=false;
+  $('qrcode').innerHTML='';
+  if(window.QRCode){
+    new QRCode($('qrcode'),{text:data.phone_url,width:180,height:180,correctLevel:QRCode.CorrectLevel.M});
+  }else{
+    $('qrcode').textContent='QR library ໂຫຼດບໍ່ສຳເລັດ';
+    $('pairError').textContent='ສາມາດກົດລິ້ງດ້ານລຸ່ມເພື່ອເປີດໃນມືຖືແທນໄດ້.';
+  }
+  pc=new RTCPeerConnection({iceServers:ICE_SERVERS, iceCandidatePoolSize:4});
+  // CRITICAL: the PC is the offerer and receives the phone's camera stream.
+  // Reserve a video m-line BEFORE createOffer(), otherwise the offer can
+  // contain no video section and the phone cannot negotiate a video track.
+  pc.addTransceiver('video',{direction:'recvonly'});
+  pc.onicecandidate=e=>{if(e.candidate)sendSignal('candidate',e.candidate.toJSON()).catch(err=>{console.error('Send PC ICE failed',err);$('pairError').textContent='ສົ່ງ ICE candidate ບໍ່ສຳເລັດ: '+err.message;});};
+  pc.onconnectionstatechange=()=>{const s=pc.connectionState;console.log('PC connectionState:',s);$('camState').textContent='WebRTC: '+s;if(s==='connected'){status('WebRTC ເຊື່ອມຕໍ່ແລ້ວ',true);}else if(s==='failed'){status('WebRTC ລົ້ມເຫຼວ • ກວດ TURN Server');$('pairError').textContent='WebRTC connection failed. ອາດຕ້ອງຕັ້ງຄ່າ TURN Server.';}else if(s==='disconnected'){status('ສັນຍານຂາດ • ກຳລັງລອງໃໝ່');}};
+  pc.oniceconnectionstatechange=()=>{const s=pc.iceConnectionState;console.log('PC ICE state:',s);$('pairHint').textContent='ICE: '+s;$('camState').textContent='ICE: '+s;if(s==='failed')$('pairError').textContent='ICE failed: STUN ບໍ່ສາມາດຫາເສັ້ນທາງໄດ້. ຕ້ອງກວດ TURN.';};
+  pc.ontrack=e=>{
+   console.log('PC received remote track:',e.track.kind,e.track.readyState);
+   const stream=(e.streams&&e.streams[0])?e.streams[0]:new MediaStream([e.track]);
+   video.srcObject=stream; video.muted=true; video.autoplay=true; video.playsInline=true;
+   video.onloadedmetadata=()=>console.log('Remote video metadata:',video.videoWidth,video.videoHeight);
+   video.onplaying=()=>{console.log('Remote video is PLAYING');$('camState').textContent='ກຳລັງສະແດງພາບສົດ';};
+   video.play().then(()=>console.log('Remote video play() succeeded')).catch(err=>{console.error('Remote video play failed',err);$('pairError').textContent='Video playback: '+err.message;});
+   $('startBtn').disabled=false;status('ໄດ້ຮັບພາບຈາກມືຖື • AI ພ້ອມ',true);$('camState').textContent='ໄດ້ຮັບ Video Track ແລ້ວ';
+  };
+  const offer=await pc.createOffer();
+  if(!offer.sdp || !offer.sdp.includes('m=video')) throw new Error('Offer ບໍ່ມີ Video Media Section');
+  await pc.setLocalDescription(offer);await sendSignal('offer',pc.localDescription);
+  status('ລໍຖ້າມືຖືສະແກນ QR Code');
+  if(signalTimer)clearInterval(signalTimer);
+  signalTimer=setInterval(pollSignals,700); pollSignals();
+  $('makePair').textContent='ສ້າງ QR Code ໃໝ່';
+  $('makePair').disabled=false;
+ }catch(e){
+  console.error('Pairing failed:',e);
+  status('ສ້າງການເຊື່ອມຕໍ່ບໍ່ສຳເລັດ');
+  $('pairError').textContent='ຜິດພາດ: '+(e.message||'ກວດສອບ Server ແລະ Login ອີກຄັ້ງ');
+  $('makePair').disabled=false;$('makePair').textContent='ລອງສ້າງ QR Code ອີກຄັ້ງ';
+ }
+}
+function drawResults(results){
+ if(!video.videoWidth)return;canvas.width=video.videoWidth;canvas.height=video.videoHeight;ctx.clearRect(0,0,canvas.width,canvas.height);
+ if(results.poseLandmarks){const L=results.poseLandmarks;box.style.display='block';status('ກວດພົບຄົນ • AI ພ້ອມນັບ',true);$('camState').textContent='ກວດພົບຮ່າງກາຍແລ້ວ';
+ const xs=L.filter(p=>p.visibility>.45).map(p=>p.x),ys=L.filter(p=>p.visibility>.45).map(p=>p.y);if(xs.length){const stage=$('cameraStage'),sw=stage.clientWidth,sh=stage.clientHeight,ar=video.videoWidth/video.videoHeight,sar=sw/sh;let dw=sw,dh=sh,ox=0,oy=0;if(ar>sar){dh=sw/ar;oy=(sh-dh)/2;}else{dw=sh*ar;ox=(sw-dw)/2;}const minX=Math.max(0,Math.min(...xs)),minY=Math.max(0,Math.min(...ys)),maxX=Math.min(1,Math.max(...xs)),maxY=Math.min(1,Math.max(...ys));box.style.left=(ox+minX*dw)+'px';box.style.top=(oy+minY*dh)+'px';box.style.width=((maxX-minX)*dw)+'px';box.style.height=((maxY-minY)*dh)+'px';}
+ const pairs=[[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24],[23,25],[25,27],[24,26],[26,28],[27,29],[29,31],[28,30],[30,32]];ctx.lineWidth=Math.max(3,canvas.width/260);ctx.strokeStyle='#25f69a';ctx.fillStyle='#8affc5';pairs.forEach(([a,b])=>{if(L[a].visibility>.4&&L[b].visibility>.4){ctx.beginPath();ctx.moveTo(L[a].x*canvas.width,L[a].y*canvas.height);ctx.lineTo(L[b].x*canvas.width,L[b].y*canvas.height);ctx.stroke();}});L.forEach(p=>{if(p.visibility>.55){ctx.beginPath();ctx.arc(p.x*canvas.width,p.y*canvas.height,Math.max(3,canvas.width/180),0,Math.PI*2);ctx.fill();}});
+ const hip=(L[23].y+L[24].y)/2;if(baselineHip===null)baselineHip=hip;else if(!running)baselineHip=baselineHip*.96+hip*.04;const lift=baselineHip-hip;if(running&&!paused){const now=Date.now();if(lift>.035&&!airborne&&now-lastJump>280)airborne=true;if(airborne&&lift<.012&&now-lastJump>280){jumps++;lastJump=now;airborne=false;updateStats();}}
+ }else{box.style.display='none';status('ຍັງບໍ່ພົບຄົນ • ຈັດມຸມກ້ອງໃໝ່');$('camState').textContent='ບໍ່ພົບຕົວຄົນ';}}
+async function initPose(){if(!window.Pose){status('ໂຫຼດ AI ບໍ່ສຳເລັດ • ກວດ Internet');return;}pose=new Pose({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/pose/${f}`});pose.setOptions({modelComplexity:1,smoothLandmarks:true,enableSegmentation:false,minDetectionConfidence:.55,minTrackingConfidence:.55});pose.onResults(drawResults);async function frame(){if(video.readyState>=2&&video.videoWidth){try{await pose.send({image:video});}catch(e){}}requestAnimationFrame(frame);}frame();}
+$('makePair').onclick=createPair;
+$('startBtn').onclick=()=>{running=true;paused=false;airborne=false;baselineHip=null;$('startBtn').disabled=true;$('pauseBtn').disabled=false;$('stopBtn').disabled=false;tick=setInterval(()=>{if(running&&!paused){seconds++;updateStats();}},1000);};
+$('pauseBtn').onclick=()=>{paused=!paused;$('pauseBtn').innerHTML=paused?'▶<small>ສືບຕໍ່</small>':'Ⅱ<small>ພັກ</small>';status(paused?'ພັກການນັບ':'AI ພ້ອມນັບ',!paused);};
+$('stopBtn').onclick=async()=>{running=false;paused=false;clearInterval(tick);$('startBtn').disabled=false;$('pauseBtn').disabled=true;$('stopBtn').disabled=true;try{if(jumps||seconds){const r=await fetch('/api/workout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jumps,duration:seconds})});if(!r.ok)throw Error();alert('ບັນທຶກສຳເລັດ!');}}catch(e){alert('ບັນທຶກບໍ່ສຳເລັດ');}jumps=0;seconds=0;baselineHip=null;updateStats();};
+initPose();
+</script>{% endblock %}

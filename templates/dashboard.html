@@ -1,0 +1,8 @@
+{% extends "base.html" %}{% block content %}<main class="page">
+<div class="welcome"><div><p class="eyebrow">YOUR DAILY TRAINING</p><h1>ສະບາຍດີ, {{ user.username }} 👋</h1><p class="muted">ພ້ອມກະໂດດເພື່ອສຸຂະພາບແລ້ວບໍ?</p></div><div class="date-pill">✦ AI POWERED</div></div>
+<section class="hero-panel"><div class="hero-copy"><span class="live-dot">● AI JUMP TRACKING</span><h2>Keep<br><em>Going!</em></h2><p>ທຸກການກະໂດດ ຄືອີກກ້າວຂອງເຈົ້າ</p><a class="primary" href="{{ url_for('camera') }}">▶ ເລີ່ມກະໂດດດຽວນີ້</a></div><div class="hero-count"><div class="ring"><strong>{{ total_jumps }}</strong><span>ຄັ້ງທັງໝົດ</span></div></div></section>
+<div class="section-heading"><h2>ສະຖິຕິຂອງເຈົ້າ</h2><a href="{{ url_for('history') }}">ເບິ່ງປະຫວັດ →</a></div>
+<div class="stats-grid"><article class="stat-card"><span class="stat-icon cyan">↗</span><b>{{ total_jumps }}</b><small>ຈຳນວນກະໂດດ</small></article><article class="stat-card"><span class="stat-icon violet">◷</span><b>{{ (total_seconds // 60) }}<small>ນາທີ</small></b><small>ເວລາຝຶກທັງໝົດ</small></article><article class="stat-card"><span class="stat-icon orange">♨</span><b>{{ total_calories }} <small>kcal</small></b><small>Calories ໂດຍປະມານ</small></article></div>
+<div class="section-heading"><h2>ການຝຶກລ່າສຸດ</h2></div>
+<div class="panel">{% if workouts %}{% for w in workouts %}<div class="history-row"><div class="history-symbol">⚡</div><div class="history-info"><b>{{ w.jumps }} ຄັ້ງ</b><small>{{ w.created_at.strftime('%d/%m/%Y %H:%M') }}</small></div><span>{{ (w.duration//60) }}:{{ '%02d' % (w.duration%60) }} ນາທີ</span></div>{% endfor %}{% else %}<p class="empty">ຍັງບໍ່ມີປະຫວັດ. ກົດ “ເລີ່ມກະໂດດ” ເພື່ອເລີ່ມຝຶກຄັ້ງທຳອິດ.</p>{% endif %}</div>
+</main>{% endblock %}

@@ -1,0 +1,13 @@
+{% extends "base.html" %}{% block content %}
+<main class="auth-page"><div class="auth-glow"></div><section class="auth-card">
+<div class="logo-mark">跳</div><p class="eyebrow">MOVE • JUMP • ACHIEVE</p><h1>Rope Skipping <em>Counter</em></h1>
+<p class="muted">ນັບທຸກການກະໂດດ ພັດທະນາທຸກມື້</p>
+<h2>{{ 'ສ້າງບັນຊີ' if mode=='register' else 'ຍິນດີຕ້ອນຮັບກັບຄືນ' }}</h2>
+<form method="post" class="auth-form">
+{% if mode=='register' %}<label>ຊື່ຜູ້ໃຊ້</label><input name="username" minlength="3" maxlength="32" placeholder="ຕັ້ງຊື່ຜູ້ໃຊ້" required>
+<label>ອີເມວ</label><input type="email" name="email" placeholder="you@example.com" required>{% else %}
+<label>ຊື່ຜູ້ໃຊ້ ຫຼື ອີເມວ</label><input name="identity" placeholder="Username or email" required>{% endif %}
+<label>ລະຫັດຜ່ານ</label><input type="password" name="password" minlength="6" placeholder="ຢ່າງໜ້ອຍ 6 ຕົວ" required>
+<button class="primary full">{{ 'ລົງທະບຽນ' if mode=='register' else 'ເຂົ້າລະບົບ' }} <span>→</span></button></form>
+<p class="switch-auth">{{ 'ມີບັນຊີແລ້ວ?' if mode=='register' else 'ຍັງບໍ່ມີບັນຊີ?' }} <a href="{{ url_for('login' if mode=='register' else 'register') }}">{{ 'ເຂົ້າລະບົບ' if mode=='register' else 'ສ້າງບັນຊີໃໝ່' }}</a></p>
+</section></main>{% endblock %}

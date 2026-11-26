@@ -1,0 +1,28 @@
+<!doctype html><html lang="lo"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Phone Camera • Rope Skipping</title><link rel="stylesheet" href="{{ url_for('static',filename='style.css') }}"></head><body>
+<main class="phone-page"><div class="phone-head"><div class="brand-icon">跳</div><p class="eyebrow">ROPE SKIPPING COUNTER</p><h1>ເຊື່ອມກ້ອງມືຖື</h1><p class="muted">ໃຊ້ມືຖືເປັນກ້ອງສົ່ງພາບສົດໄປຍັງ PC</p></div>
+{% if invalid %}<div class="panel"><p>QR Code ນີ້ໝົດອາຍຸ ຫຼື ບໍ່ຖືກຕ້ອງ. ກະລຸນາສ້າງ QR Code ໃໝ່ຈາກ PC.</p></div>{% else %}
+<div class="phone-video"><video id="localVideo" autoplay playsinline muted></video><div id="phoneStatus" class="phone-status">ກົດເປີດກ້ອງເພື່ອເລີ່ມ</div></div>
+<div class="phone-actions"><button id="connectBtn" class="primary full">📷 ເປີດກ້ອງ ແລະ ເຊື່ອມຕໍ່ PC</button><button id="flipBtn" class="round-btn">⇄<small>ປ່ຽນກ້ອງ</small></button></div>
+<p class="camera-note">ວາງມືຖືໃຫ້ໝັ້ນຄົງ ແລະໃຫ້ເຫັນຮ່າງກາຍເຕັມຕົວ. ຢ່າປິດໜ້ານີ້ຂະນະຝຶກ.</p>
+{% endif %}</main>
+{% if not invalid %}<script>
+const code={{ code|tojson }},video=document.getElementById('localVideo'),statusEl=document.getElementById('phoneStatus'),ICE_SERVERS={{ ice_servers|tojson }};let stream=null,pc=null,facing='environment',cursor=-1,pending=[],pollTimer=null,polling=false;
+function say(s){statusEl.textContent=s;}
+// Prefer a high-resolution, wide landscape capture. Browsers may ignore ideals
+// when the selected phone camera does not support them.
+function cameraConstraints(){return {audio:false,video:{facingMode:{ideal:facing},width:{ideal:1920},height:{ideal:1080},aspectRatio:{ideal:16/9}}};}
+async function reduceDigitalZoom(mediaStream){
+ const track=mediaStream.getVideoTracks()[0];
+ if(!track || !track.getCapabilities) return;
+ const caps=track.getCapabilities();
+ // On supported Android/iOS browsers, request the lowest optical/digital zoom.
+ if(typeof caps.zoom==='object' && Number.isFinite(caps.zoom.min)){
+   try{await track.applyConstraints({advanced:[{zoom:caps.zoom.min}]});}catch(e){console.info('Camera zoom control unavailable:',e);}
+ }
+}
+async function send(kind,payload){await fetch('/api/signal/'+code,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sender:'phone',kind,payload})});}
+async function poll(){if(polling||!pc)return;polling=true;try{const r=await fetch('/api/signal/'+code+'?sender=phone&after='+cursor,{cache:'no-store'}),d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||('Signaling HTTP '+r.status));for(const m of d.messages||[]){cursor=Math.max(cursor,m.id);if(m.kind==='offer'){if(!pc.currentRemoteDescription){await pc.setRemoteDescription(m.payload);const answer=await pc.createAnswer();await pc.setLocalDescription(answer);await send('answer',pc.localDescription);say('ສົ່ງ Answer ແລ້ວ • ກຳລັງເຊື່ອມ WebRTC');}for(const c of pending){try{await pc.addIceCandidate(c);}catch(err){console.warn('Queued ICE candidate failed',err);}}pending=[];}else if(m.kind==='candidate'&&m.payload){const c=new RTCIceCandidate(m.payload);if(pc.remoteDescription){try{await pc.addIceCandidate(c);}catch(err){console.warn('ICE candidate failed',err);}}else pending.push(c);}}}catch(e){console.error('Phone signaling poll failed',e);say('Signaling ຜິດພາດ: '+e.message);}finally{polling=false;}}
+async function connect(){document.getElementById('connectBtn').disabled=true;try{stream=await navigator.mediaDevices.getUserMedia(cameraConstraints());await reduceDigitalZoom(stream);video.srcObject=stream;await video.play().catch(()=>{});pc=new RTCPeerConnection({iceServers:ICE_SERVERS,iceCandidatePoolSize:4});stream.getTracks().forEach(t=>pc.addTrack(t,stream));pc.onicecandidate=e=>{if(e.candidate)send('candidate',e.candidate.toJSON()).catch(err=>{console.error(err);say('ສົ່ງ ICE ບໍ່ສຳເລັດ');});};pc.onconnectionstatechange=()=>{console.log('Phone connectionState:',pc.connectionState);if(pc.connectionState==='connected')say('ສົ່ງພາບສົດໄປ PC ແລ້ວ ✓');else if(pc.connectionState==='failed')say('WebRTC ລົ້ມເຫຼວ • ຕ້ອງກວດ TURN');else say('ສະຖານະ: '+pc.connectionState);};pc.oniceconnectionstatechange=()=>{console.log('Phone ICE state:',pc.iceConnectionState);};say('ເປີດກ້ອງແລ້ວ • ກຳລັງລໍຖ້າ PC');pollTimer=setInterval(poll,700);poll();}catch(e){say('ເປີດກ້ອງບໍ່ໄດ້. ກວດ HTTPS ແລະອະນຸຍາດ Camera.');document.getElementById('connectBtn').disabled=false;}}
+document.getElementById('connectBtn').onclick=connect;document.getElementById('flipBtn').onclick=async()=>{facing=facing==='environment'?'user':'environment';if(stream){stream.getTracks().forEach(t=>t.stop());try{stream=await navigator.mediaDevices.getUserMedia(cameraConstraints());await reduceDigitalZoom(stream);video.srcObject=stream;await video.play().catch(()=>{});const sender=pc.getSenders().find(s=>s.track&&s.track.kind==='video');if(sender)await sender.replaceTrack(stream.getVideoTracks()[0]);say('ປ່ຽນກ້ອງແລ້ວ');}catch(e){say('ປ່ຽນກ້ອງບໍ່ສຳເລັດ');}}};
+window.addEventListener('beforeunload',()=>{try{send('bye',{});}catch(e){}if(pollTimer)clearInterval(pollTimer);if(pc)pc.close();if(stream)stream.getTracks().forEach(t=>t.stop());});
+</script>{% endif %}</body></html>

@@ -1,0 +1,16 @@
+<!doctype html><html lang="lo"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Rope Skipping Counter</title><link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+{% block head %}{% endblock %}</head><body>
+{% if user is defined and user %}
+<header class="topbar"><a class="brand" href="{{ url_for('dashboard') }}"><span class="brand-icon">跳</span><span>ROPE SKIPPING <b>COUNTER</b></span></a>
+<div class="top-actions"><span class="user-chip">● {{ user.username }}</span><a class="logout" href="{{ url_for('logout') }}">ອອກຈາກລະບົບ</a></div></header>
+{% endif %}
+{% with messages = get_flashed_messages(with_categories=true) %}{% if messages %}<div class="flash-wrap">{% for category,message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}</div>{% endif %}{% endwith %}
+{% block content %}{% endblock %}
+{% if user is defined and user %}<nav class="bottom-nav">
+<a href="{{ url_for('dashboard') }}" class="{{ 'active' if request.endpoint=='dashboard' else '' }}"><span>⌂</span>ໜ້າຫຼັກ</a>
+<a href="{{ url_for('history') }}" class="{{ 'active' if request.endpoint=='history' else '' }}"><span>▥</span>ປະຫວັດ</a>
+<a href="{{ url_for('leaderboard') }}" class="{{ 'active' if request.endpoint=='leaderboard' else '' }}"><span>♛</span>ຈັດອັນດັບ</a>
+<a href="{{ url_for('achievements') }}" class="{{ 'active' if request.endpoint=='achievements' else '' }}"><span>🏆</span>ລາງວັນ</a>
+</nav>{% endif %}
+</body></html>
